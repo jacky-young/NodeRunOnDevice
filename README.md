@@ -10,4 +10,6 @@ An shell script for nodejs tests running on python-unsupported target devices
 
 3. Modify your device executive node command path on script parameter CMD_CONFIG or else "which node" path will be default
 
-4. Adb push this script to device & `chmod 755 noderun.sh`, then `./noderun.sh`
+4. Adb push this script to device & `adb shell` `chmod 755 noderun.sh`, then `./noderun.sh`
+
+5. The node running result will directly show on device command line
