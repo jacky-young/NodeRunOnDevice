@@ -1,20 +1,16 @@
 #!/system/bin/sh
 #author: Jacky Young
 
-BIG_TESTS_BASE_DIR="/data/nodejs/node-5.6.0/test/"
-BIG_TESTS_NAME=(message sequential parallel pummel internet gc debugger addons/async-hello-world addons/at-exit addons/buffer-free-callback addons/heap-profiler addons/hello-world addons/hello-world-function-export addons/load-long-path addons/make-callback addons/null-buffer-neuter addons/repl-domain-abort)
-CMD_CONFIG=""
-TIMEOUT=300
 
 function read_test_children()
 {
-    local test_children_home=$BIG_TESTS_BASE_DIR$1
+    local test_children_home=$BIG_TESTS_BASE_DIR"/"$1
     TESTLIST=$(ls $test_children_home | grep .js)
 }
 
 function read_out_children()
 {
-    local test_children_home=$BIG_TESTS_BASE_DIR$1
+    local test_children_home=$BIG_TESTS_BASE_DIR"/"$1
     OUTLIST=$(ls $test_children_home | grep .out)
 }
 
@@ -32,7 +28,7 @@ function get_cmd()
 
 function mkdir_out_bro()
 {
-    out_bro_path=$BIG_TESTS_BASE_DIR$1"/bro/"
+    out_bro_path=$BIG_TESTS_BASE_DIR"/"$1"/bro/"
     mkdir -p $out_bro_path
 }
 
@@ -62,7 +58,6 @@ function compare_out_file()
         brofile_line=$(sed -n "${j}p" $brofile)
         # echo "brofile_line: "$brofile_line
         # echo "outfile_line: "$outfile_line
-        # compare_one_line "${brofile_line}" "${outfile_line}"
         if [[ $(compare_one_line "${brofile_line}" "${outfile_line}") == "yes" ]]; then
             result="match"
         else
@@ -94,6 +89,11 @@ function test_time_out()
     done
 }
 
+function get_time_now()
+{
+    echo $(date) | tr -s " " | tr " " "\n" | sed -n "4p"
+}
+
 function arr_has_item()
 {
     local tmp
@@ -108,20 +108,110 @@ function arr_has_item()
     echo no
 }
 
-if [[ $# -gt 0 ]]; then
-    for arg in "$@"
-    do
-        if [[ $(arr_has_item "`echo ${BIG_TESTS_NAME[*]}`" "$arg") == "no" ]]; then
-            echo $arg" is not in the list: (${BIG_TESTS_NAME[@]})"
+function get_build_in_tests()
+{
+    local line_num=0
+    testpy=$BIG_TESTS_BASE_DIR"/../tools/test.py"
+    startline=$(sed -n '/BUILT_IN_TESTS\ =\ \[/=' $testpy)
+    # echo $startline
+    if [[ -n $startline ]]; then
+        let startline=$startline+1
+        line=$(sed -n "${startline}p" $testpy | sed "s/\(.*\)'\(.*\)'\(.*\)/\2/g")
+        while [[ $(echo $line | grep "]") == "" ]]; do
+            if [[ $line == "addons" ]]; then
+                children=$(ls -F $BIG_TESTS_BASE_DIR"/addons/" | grep '/$')
+                for child in $children
+                do
+                    BIG_TESTS_NAME[$line_num]=$line"/"$child
+                    let line_num=$line_num+1
+                done
+            else
+                BIG_TESTS_NAME[$line_num]=$line
+                let line_num=$line_num+1
+            fi
+            let startline=$startline+1
+            line=$(sed -n "${startline}p" $testpy | sed "s/\(.*\)'\(.*\)'\(.*\)/\2/g")
+        done
+    fi
+}
+
+
+if [[ $# -eq 0 ]]; then
+    echo "Node test directory must be needed!"
+    echo -e "Usage: ./noderun.sh [OPTION]...\nThis is an shell script for nodejs tests running on python-unsupported target devices." \
+            "You need push nodejs and this script to your device.\nThe options below are not needed for all expect -d option.\n" \
+            "  -d,\t\tyour nodejs test directory on device, necessary argument\n" \
+            "  -m,\t\toptional node cmd path, default system node path\n" \
+            "  -r,\t\toptional running test cases list\n" \
+            "  -h,\t\tdisplay this help and exit\nYou can use the script like this:\n" \
+            "./noderun.sh -d \"/path/to/node*/test/\" [-m \"/path/to/node\"] [-r \"message gc\"]"
+    exit 1
+fi
+
+while getopts "d:m:r:h" arg
+do
+    case $arg in
+        d)
+            # echo "d's arg: $OPTARG"
+            if [[ -z "$OPTARG" ]]; then
+                echo "Node test directory must be needed!"
+                exit 1
+            fi
+            BIG_TESTS_BASE_DIR=$OPTARG
+            get_build_in_tests
+            ;;
+        m)
+            # echo "m's arg: $OPTARG"
+            if [[ -n "$OPTARG" ]]; then
+                CMD_CONFIG=$OPTARG
+            fi
+            ;;
+        r)
+            # echo "r's arg: $OPTARG"
+            i=0
+            if [[ -n "$OPTARG" ]]; then
+                for arg in $OPTARG
+                do
+                    if [[ $(arr_has_item "`echo ${BIG_TESTS_NAME[*]}`" "$arg") == "no" ]]; then
+                        echo $arg" is not in the list: (${BIG_TESTS_NAME[@]})"
+                        exit 1
+                    fi
+                    RUN_TESTS_NAME[$i]=$arg
+                    let i=$i+1
+                done
+            fi
+            ;;
+        h)
+            echo -e "Usage: ./noderun.sh [OPTION]...\nThis is an shell script for nodejs tests running on python-unsupported target devices." \
+                    "You need push nodejs and this script to your device.\nThe options below are not needed for all expect -d option.\n" \
+                    "  -d,\t\tyour nodejs test directory on device, necessary argument\n" \
+                    "  -m,\t\toptional node cmd path, default system node path\n" \
+                    "  -r,\t\toptional running test cases list\n" \
+                    "  -h,\t\tdisplay this help and exit\nYou can use the script like this:\n" \
+                    "./noderun.sh -d \"/path/to/node*/test/\" [-m \"/path/to/node\"] [-r \"message gc\"]"
+            exit 0
+            ;;
+        ?)
+            echo "unknow argument!"
             exit 1
-        fi
-    done
-    RUN_TESTS_NAME=$@
-else
+            ;;
+    esac
+done
+
+if [[ -z "${RUN_TESTS_NAME[@]}" ]]; then
     RUN_TESTS_NAME=${BIG_TESTS_NAME[@]}
 fi
 
-echo "running list: ${RUN_TESTS_NAME[@]}"
+echo "Node test running directory: "$BIG_TESTS_BASE_DIR
+echo -e "Running list: ${RUN_TESTS_NAME[@]}\n"
+
+TIMEOUT=300
+RESULTFILE=$BIG_TESTS_BASE_DIR"/result-nodejs-test-edison.log"
+
+if [ -f "$RESULTFILE" ]; then
+    rm -rf "$RESULTFILE"
+fi
+touch $RESULTFILE
 
 for parent in ${RUN_TESTS_NAME[@]}
 do
@@ -137,7 +227,7 @@ do
     for child in $TESTLIST
     do
         # echo "child: "$child
-        test_full_path=$BIG_TESTS_BASE_DIR$parent"/"$child
+        test_full_path=$BIG_TESTS_BASE_DIR"/"$parent"/"$child
         get_cmd
         let i=$i+1
         if [ "${parent}" == "message" ]; then
@@ -146,19 +236,29 @@ do
             compare_out_file "${out_bro_path}${child%%.js}.bro" "${BIG_TESTS_BASE_DIR}/${parent}/${child%%.js}.out"
             if [ $? -eq 0 ] && [ "$result" == "match" ]; then
                 echo "["$total"|"$i"|pass]: "${child%%.js}" # "$CMD" "$test_full_path
+                echo "$(get_time_now) - noderun.sh - RESULTS - Testcase ${parent}-${child}: PASSED" >> $RESULTFILE
                 let pass_num=$pass_num+1
             else
                 echo "["$total"|"$i"|fail]: "${child%%.js}" # "$CMD" "$test_full_path
+                echo "$(get_time_now) - noderun.sh - RESULTS - Testcase ${parent}-${child}: FAILED" >> $RESULTFILE
+                echo "=== release ${child} ===" >> $RESULTFILE
+                cat "${out_bro_path}${child%%.js}.bro" >> $RESULTFILE
+                echo -e "\n" >> $RESULTFILE
                 let fail_num=$fail_num+1
             fi
         else
             test_time_out "${CMD}" "${test_full_path}" &
-            $CMD "${test_full_path}" >/dev/null 2>&1
+            $CMD "${test_full_path}" >/dev/null 2>$BIG_TESTS_BASE_DIR"/tmp.log"
             if [ $? -eq 0 ]; then
                 echo "["$total"|"$i"|pass]: "${child%%.js}" # "$CMD" "$test_full_path
+                echo "$(get_time_now) - noderun.sh - RESULTS - Testcase ${parent}-${child}: PASSED" >> $RESULTFILE
                 let pass_num=$pass_num+1
             else
                 echo "["$total"|"$i"|fail]: "${child%%.js}" # "$CMD" "$test_full_path
+                echo "$(get_time_now) - noderun.sh - RESULTS - Testcase ${parent}-${child}: FAILED" >> $RESULTFILE
+                echo "=== release ${child} ===" >> $RESULTFILE
+                cat "${BIG_TESTS_BASE_DIR}/tmp.log" >> $RESULTFILE
+                echo -e "\n" >> $RESULTFILE
                 let fail_num=$fail_num+1
             fi
         fi
@@ -168,4 +268,8 @@ done
 
 if [ -d "${out_bro_path}" ]; then
     rm -rf ${out_bro_path}
+fi
+
+if [ -f "${BIG_TESTS_BASE_DIR}/tmp.log" ]; then
+    rm -rf $BIG_TESTS_BASE_DIR"/tmp.log"
 fi
